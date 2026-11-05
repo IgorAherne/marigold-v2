@@ -57,8 +57,9 @@ class LoadQwenImage21Transformer:
     the input/output projections are small and every token passes through them.
     """
 
-    def __init__(self, name="Diffuser", **kwargs):
+    def __init__(self, name="Diffuser", compile_blocks=False, **kwargs):
         self.name = name
+        self.compile_blocks = bool(compile_blocks)
 
     def __call__(self, _=None):
         cfg = REGISTRY["cfg"]
@@ -110,6 +111,13 @@ class LoadQwenImage21Transformer:
             if "lora_" in name:
                 p.data = p.data.to(torch.bfloat16)
                 p.requires_grad_(True)
+        if self.compile_blocks:
+            # Fuses the small casts and elementwise kernels around the 4-bit GEMMs: ~20 % off a
+            # step, losses rounding-close. Module.compile keeps the state_dict names; one graph
+            # serves all blocks, so the limit only has to cover picture sizes x grad modes.
+            torch._dynamo.config.recompile_limit = max(torch._dynamo.config.recompile_limit, 64)
+            for block in transformer.transformer_blocks:
+                block.compile()
 
         logging.info(
             f"[Qwen-Image 2.1] quantization={level}; trainable params: "

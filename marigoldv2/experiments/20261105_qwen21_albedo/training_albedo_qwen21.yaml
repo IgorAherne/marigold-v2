@@ -71,6 +71,7 @@ network_components:
     train_decoder: true
 - LoadQwenImage21Transformer:
     name: Diffuser
+    compile_blocks: true
 network_graph:
   QwenImage21Encode:
     kwargs:
