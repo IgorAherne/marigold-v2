@@ -498,20 +498,22 @@ def main() -> None:
     assets = assets_arg.resolve()
     checkpoints = assets / "checkpoints"
     datasets = assets / "datasets"
+    missing_dinov3 = False
     if args.qwen21_albedo:
-        if not get_token():
-            raise RuntimeError(
-                "The albedo training needs DINOv3: run `hf auth login` after "
-                "accepting its terms on Hugging Face."
-            )
-        for repo_id, folder in (
-            ("Qwen/Qwen-Image-2.1-Turbo", "Qwen-Image-2.1-Turbo"),
-            (
+        _download_snapshot(
+            "Qwen/Qwen-Image-2.1-Turbo",
+            checkpoints / "Qwen-Image-2.1-Turbo",
+            repo_type="model",
+        )
+        # DINOv3 is gated: without a login everything else still downloads, and the
+        # run ends in an error naming it, so a rerun after `hf auth login` adds it.
+        missing_dinov3 = not get_token()
+        if not missing_dinov3:
+            _download_snapshot(
                 "facebook/dinov3-vitb16-pretrain-lvd1689m",
-                "dinov3-vitb16-pretrain-lvd1689m",
-            ),
-        ):
-            _download_snapshot(repo_id, checkpoints / folder, repo_type="model")
+                checkpoints / "dinov3-vitb16-pretrain-lvd1689m",
+                repo_type="model",
+            )
     elif not args.skip_checkpoints:
         _download_snapshot(
             "Qwen/Qwen-Image-Edit-2509",
@@ -576,6 +578,11 @@ def main() -> None:
                     datasets / "vkitti2", keep_archives=args.keep_archives
                 )
 
+    if missing_dinov3:
+        raise SystemExit(
+            "[missing] DINOv3, which the albedo training needs: accept its terms on "
+            "Hugging Face, run `hf auth login`, and rerun this command."
+        )
     print(f"[done] Assets are available under {assets}", flush=True)
 
 
