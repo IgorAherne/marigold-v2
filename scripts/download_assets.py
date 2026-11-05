@@ -86,6 +86,12 @@ def _parse_args() -> argparse.Namespace:
         "(needs `hf auth login`).",
     )
     parser.add_argument(
+        "--qwen21-albedo",
+        action="store_true",
+        help="Only what the Qwen-Image 2.1 albedo training needs: Qwen-Image-2.1-Turbo, "
+        "DINOv3 (needs `hf auth login`) and the Hypersim RGB shards.",
+    )
+    parser.add_argument(
         "--include-layereddepth-syn",
         action="store_true",
         help=(
@@ -484,7 +490,21 @@ def main() -> None:
     assets = assets_arg.resolve()
     checkpoints = assets / "checkpoints"
     datasets = assets / "datasets"
-    if not args.skip_checkpoints:
+    if args.qwen21_albedo:
+        if not get_token():
+            raise RuntimeError(
+                "The albedo training needs DINOv3: run `hf auth login` after "
+                "accepting its terms on Hugging Face."
+            )
+        for repo_id, folder in (
+            ("Qwen/Qwen-Image-2.1-Turbo", "Qwen-Image-2.1-Turbo"),
+            (
+                "facebook/dinov3-vitb16-pretrain-lvd1689m",
+                "dinov3-vitb16-pretrain-lvd1689m",
+            ),
+        ):
+            _download_snapshot(repo_id, checkpoints / folder, repo_type="model")
+    elif not args.skip_checkpoints:
         _download_snapshot(
             "Qwen/Qwen-Image-Edit-2509",
             checkpoints / "Qwen-Image-Edit-2509",
@@ -522,12 +542,13 @@ def main() -> None:
             )
             if not any(hypersim_root.glob("hypersim-*.tar")):
                 raise RuntimeError(f"No hypersim-*.tar shards found in {hypersim_root}")
-        _download_snapshot(
-            "obukhovai/vkitti2",
-            datasets / "vkitti2",
-            repo_type="dataset",
-            watchdog=True,
-        )
+        if not args.qwen21_albedo:
+            _download_snapshot(
+                "obukhovai/vkitti2",
+                datasets / "vkitti2",
+                repo_type="dataset",
+                watchdog=True,
+            )
         if args.include_layereddepth_syn:
             layereddepth_root = datasets / "LayeredDepth-Syn"
             _download_snapshot(
@@ -542,7 +563,10 @@ def main() -> None:
                 _extract_archives(
                     datasets / "marigold_train", keep_archives=args.keep_archives
                 )
-            _extract_archives(datasets / "vkitti2", keep_archives=args.keep_archives)
+            if not args.qwen21_albedo:
+                _extract_archives(
+                    datasets / "vkitti2", keep_archives=args.keep_archives
+                )
 
     print(f"[done] Assets are available under {assets}", flush=True)
 

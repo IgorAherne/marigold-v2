@@ -12,9 +12,9 @@ requires-python = ">=3.10"
 dependencies = [
     "accelerate==1.13.0",
     "bitsandbytes==0.49.2",
-    "diffusers==0.38.0",
+    "diffusers==0.42.1",
     "h5py>=3.10",  # Hypersim dataset builders under scripts/
-    "huggingface_hub==1.8.0",
+    "huggingface_hub==2.4.0",
     "lpips==0.1.4",
     "matplotlib==3.10.8",
     "numpy==2.2.5",
@@ -32,7 +32,7 @@ dependencies = [
     "tabulate==0.10.0",
     "tensorboard==2.20.0",
     "tqdm==4.67.3",
-    "transformers==5.4.0",
+    "transformers==5.22.1",
     "wandb==0.26.1",
 ]
 

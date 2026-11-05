@@ -1,0 +1,147 @@
+# ---- Base configs (dataset definitions) ----
+base_config:
+  - marigoldv2/config/datasets/20260803_hypersim_qwen_albedo_768.yaml
+
+register_modules:
+- marigoldv2.dataset.generic_dataset
+- marigoldv2.dataset.dataloading.transform
+- marigoldv2.dataset.manifest.manifest
+- marigoldv2.dataset.manifest.manifest_transforms
+- marigoldv2.validation.validate_steps
+- marigoldv2.loss.loss
+- marigoldv2.experiments.20260803_qwen_albedo.data
+- marigoldv2.experiments.20260803_qwen_albedo.network_graph
+- marigoldv2.experiments.20260803_qwen_albedo.loss
+- marigoldv2.experiments.20260803_qwen_albedo.validation
+- marigoldv2.experiments.20261105_qwen21_albedo.network_graph
+- marigoldv2.experiments.20261105_qwen21_albedo.component_loader
+
+masked_albedo_l1_loss_weight: 1.0
+dinov3_spatial_loss_weight: 0.2
+dinov3_model_name: ${oc.env:DEPTH_ASSETS_DIR,./assets}/checkpoints/dinov3-vitb16-pretrain-lvd1689m
+dinov3_input_size: 224
+dinov3_spatial_norm_gamma: 0.7
+dinov3_token_l1_weight: 1.0
+dinov3_pairwise_weight: 1.0
+dinov3_max_tokens_for_pairwise: 256
+
+scale: 1.0
+logging:
+  console_log: ${mul:${scale},20}
+  file_log: ${mul:${scale},10}
+paths:
+  use_paths_from: env_paths
+  env_paths:
+    base_data_dir: ${oc.env:DEPTH_ASSETS_DIR,./assets}/datasets
+    out_dir: output/train_runs
+    embed_dir: ${oc.env:DEPTH_ASSETS_DIR,./assets}/checkpoints/qwen21_text_embeddings
+    ckpt_qwen_image21: ${oc.env:DEPTH_ASSETS_DIR,./assets}/checkpoints/Qwen-Image-2.1-Turbo
+dataloader:
+  effective_batch_size: 1
+  max_train_batch_size: 1
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+  seed: 2025
+dataset:
+  train:
+    hypersim_train_albedo_qwen_768: ${hypersim_train_albedo_qwen_768}
+  val:
+    hypersim_val_albedo_qwen_768: ${hypersim_val_albedo_qwen_768}
+  vis:
+    hypersim_vis_albedo_qwen_768: ${hypersim_vis_albedo_qwen_768}
+trainer:
+  name: GenericTrainer
+  dtype: torch.bfloat16
+eval:
+  eval_metrics: []
+validation:
+  main_val_metric: albedo_mae
+  main_val_metric_goal: minimize
+  file_path_key: rgb_path
+network_components:
+- LoadQwenImage21VAE:
+    name: VAE
+    train_decoder: true
+- LoadQwenImage21Transformer:
+    name: Diffuser
+network_graph:
+  QwenImage21Encode:
+    kwargs:
+      input_key: rgb_norm
+      output_key: lat_encoding
+  QwenImage21Step:
+    kwargs:
+      prefix: qwen21_albedo
+      timestep: 0.499
+  QwenImage21Decode:
+    kwargs:
+      input_key: lat_encoding
+      output_key: pixel_pred
+      checkpoint: false
+  RGBAlbedoPrediction:
+    kwargs:
+      input_key: out/pixel_pred
+      output_key: albedo_pred
+loss_graph:
+  MaskedRGBAlbedoL1Loss:
+    pred_key: out/albedo_pred
+    gt_key: albedo_gt
+    mask_key: valid_mask
+    weight: ${masked_albedo_l1_loss_weight}
+    loss_name: masked_rgb_albedo_l1_loss
+  DinoV3SpatialLoss:
+    pred_key: out/albedo_pred
+    gt_key: albedo_gt
+    mask_key: valid_mask
+    weight: ${dinov3_spatial_loss_weight}
+    loss_name: dinov3_gt_albedo_spatial_loss
+    model_name: ${dinov3_model_name}
+    input_size: ${dinov3_input_size}
+    gamma: ${dinov3_spatial_norm_gamma}
+    token_l1_weight: ${dinov3_token_l1_weight}
+    pairwise_weight: ${dinov3_pairwise_weight}
+    max_tokens_for_pairwise: ${dinov3_max_tokens_for_pairwise}
+optimization:
+  max_iter: ${mul:${scale},30000}
+  max_epoch: ${mul:${scale},100000}
+  vis_period: ${mul:${scale},2000}
+  vis_points: []
+  val_period: ${mul:${scale},2000}
+  val_points: []
+  ckpt_points: ${scale_list:${scale},5000,10000,15000,20000,25000,30000}
+  max_grad_norm: 1.0
+  scheduler:
+    name: three_phase_linear
+    base_lr: 5.0e-05
+    warmup_steps: ${mul:${scale},200}
+    start_factor: 0.01
+    decay_steps: ${mul:${scale},20000}
+    final_factor: 0.1
+  quantization:
+    level: 4bit
+    skip_modules:
+    - modulation
+    - time_text_embed
+    - img_in
+    - norm_out
+    - proj_out
+  lora:
+    rank: 128
+    lora_alpha: 128
+    lora_dropout: 0.0
+    init_lora_weights: gaussian
+    target_modules:
+    - img_in
+    - txt_in.in_layer
+    - txt_in.out_layer
+    - modulation.1
+    - to_q
+    - to_k
+    - to_v
+    - to_out.0
+    - img_mlp.proj
+    - img_mlp.gate_layer
+    - img_mlp.out
+    - norm_out.linear
