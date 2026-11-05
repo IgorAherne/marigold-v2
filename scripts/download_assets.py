@@ -214,22 +214,22 @@ def _download_snapshot_with_watchdog(
     and the file starts over: the timeout must cover a whole file.
     """
     files = list_repo_files(repo_id=repo_id, repo_type=repo_type)
-    selected = [
+    matched = [
         filename
         for filename in files
-        if (
-            not allow_patterns
-            or any(fnmatch.fnmatch(filename, pattern) for pattern in allow_patterns)
-        )
-        and (
-            not ignore_patterns
-            or not any(
-                fnmatch.fnmatch(filename, pattern) for pattern in ignore_patterns
-            )
-        )
+        if not allow_patterns
+        or any(fnmatch.fnmatch(filename, pattern) for pattern in allow_patterns)
+    ]
+    if not matched:
+        raise RuntimeError(f"No files matched the requested patterns in {repo_id}")
+    selected = [
+        filename
+        for filename in matched
+        if not any(fnmatch.fnmatch(filename, pattern) for pattern in ignore_patterns or [])
     ]
     if not selected:
-        raise RuntimeError(f"No files matched the requested patterns in {repo_id}")
+        print(f"[skip] {repo_id}: every file is already extracted", flush=True)
+        return
 
     context = multiprocessing.get_context("spawn")
     partials = destination / ".cache" / "huggingface" / "download"
@@ -550,7 +550,9 @@ def main() -> None:
                 allow_patterns=["hypersim-*.tar"],
                 watchdog=True,
             )
-            if not any(hypersim_root.glob("hypersim-*.tar")):
+            if not any(hypersim_root.glob("hypersim-*.tar")) and not any(
+                hypersim_root.glob(".hypersim-*.tar.extracted")
+            ):
                 raise RuntimeError(f"No hypersim-*.tar shards found in {hypersim_root}")
         if not args.qwen21_albedo:
             _download_snapshot(
