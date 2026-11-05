@@ -31,6 +31,10 @@ What differs:
 - `QwenImage21Decode` recomputes the decoder in the backward pass (`checkpoint:
   true`): bit-identical output. At 1024x768 a step otherwise peaks at 28.6 GiB on a
   32 GB RTX 5090 (18.5 GiB with it, 2.06 vs 1.95 s a step; DINOv3 not included).
+- `compile_blocks: true` runs each DiT block through torch.compile: about 20 % off a
+  step, losses within bf16 rounding of eager. Each new picture size compiles once
+  (~20 s). RTX 5090, without DINOv3: Hypersim 1024x768 1.67 s / 18.5 GiB; Arb-Objaverse
+  512, 768, 1024 (drawn at random) 0.58 s / 10.5, 1.21 s / 15.5, 2.24 s / 22.5 GiB.
 
 ## On a Linux pod (one 32 GB card with bf16, about 1 TB of disk)
 
