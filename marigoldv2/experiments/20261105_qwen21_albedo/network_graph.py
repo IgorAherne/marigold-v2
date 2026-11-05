@@ -8,11 +8,17 @@ from marigoldv2.core.registry import REGISTRY, get, register
 
 
 def _latent_stats(vae, ref):
-    """Per-channel mean and std of the Qwen-Image 2.1 latent space."""
-    shape = (1, vae.config.z_dim, 1, 1, 1)
-    mean = torch.tensor(vae.config.latents_mean, device=ref.device, dtype=ref.dtype)
-    std = torch.tensor(vae.config.latents_std, device=ref.device, dtype=ref.dtype)
-    return mean.view(shape), std.view(shape)
+    """Per-channel mean and std of the Qwen-Image 2.1 latent space, uploaded once per
+    device and dtype (a host-to-device copy of a Python list waits for the GPU)."""
+    cache = vae.__dict__.setdefault("_latent_stats", {})
+    key = (ref.device, ref.dtype)
+    if key not in cache:
+        shape = (1, vae.config.z_dim, 1, 1, 1)
+        cache[key] = tuple(
+            torch.tensor(v, device=ref.device, dtype=ref.dtype).view(shape)
+            for v in (vae.config.latents_mean, vae.config.latents_std)
+        )
+    return cache[key]
 
 
 @register("network_graph")
@@ -99,6 +105,7 @@ class QwenImage21Step:
         )
         self.prompt_mask_cpu = (mask > 0).contiguous()  # [1, L]
         self.unpadded = bool(self.prompt_mask_cpu.all())
+        self._on_device = {}
         # Cast to bf16 like the hidden states: 0.499 runs as 0.498046875.
         self.timestep = float(kwargs.get("timestep", 0.499))
 
@@ -116,10 +123,17 @@ class QwenImage21Step:
         device = next(diffuser.parameters()).device
         dtype = torch.bfloat16
 
-        embeds = self.prompt_embeds_cpu.to(device=device, dtype=dtype).expand(B, -1, -1)
-        mask = self.prompt_mask_cpu.to(device=device).expand(B, -1)
-        text_slots = torch.zeros_like(mask)  # a text-only prompt holds no image slots
-        img_mask = torch.cat([text_slots, mask.new_ones(B, H * W // 4)], dim=1)
+        if device not in self._on_device:
+            self._on_device[device] = (
+                self.prompt_embeds_cpu.to(device=device, dtype=dtype),
+                self.prompt_mask_cpu.to(device=device),
+            )
+        embeds, mask = self._on_device[device]
+        embeds, mask = embeds.expand(B, -1, -1), mask.expand(B, -1)
+        # On the CPU: the transformer reads the sequence layout from it without
+        # waiting for the GPU. A text-only prompt holds no image slots.
+        img_mask = torch.zeros(B, mask.shape[1] + H * W // 4, dtype=torch.bool)
+        img_mask[:, mask.shape[1] :] = True
         packed = lat[:, :, 0].flatten(2).transpose(1, 2).to(dtype)  # [B, H*W, C]
         timestep = torch.full((B,), self.timestep, device=device, dtype=dtype)
 

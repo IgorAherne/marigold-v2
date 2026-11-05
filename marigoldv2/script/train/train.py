@@ -10,7 +10,7 @@ import random
 import numpy as np
 import bitsandbytes as bnb
 
-from accelerate import Accelerator
+from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.utils import (
     DistributedDataParallelKwargs,
     ProjectConfiguration,
@@ -85,6 +85,9 @@ def main():
             project_dir=cfg.out_dir_run, logging_dir=Path(cfg.out_dir_acc)
         ),
         kwargs_handlers=[DistributedDataParallelKwargs(find_unused_parameters=True)],
+        # Batches arrive in pinned memory (dataloader.pin_memory): copy them to the
+        # GPU without making the CPU wait for the GPU first.
+        dataloader_config=DataLoaderConfiguration(non_blocking=True),
     )
 
     if (

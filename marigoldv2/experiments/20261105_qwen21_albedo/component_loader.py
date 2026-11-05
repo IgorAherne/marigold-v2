@@ -5,11 +5,13 @@ decoder."""
 import logging
 
 import torch
-from diffusers import AutoencoderKLQwenImage21, QwenImage21Transformer2DModel
+from diffusers import AutoencoderKLQwenImage21
 from diffusers import BitsAndBytesConfig as DiffusersBitsAndBytesConfig
 from peft import LoraConfig, prepare_model_for_kbit_training
 
 from marigoldv2.core.registry import REGISTRY, register
+
+from .transformer import QwenImage21TextThenTarget
 
 
 def _device():
@@ -82,7 +84,7 @@ class LoadQwenImage21Transformer:
         )
         if quantization_config is not None:
             kwargs["quantization_config"] = quantization_config
-        transformer = QwenImage21Transformer2DModel.from_pretrained(
+        transformer = QwenImage21TextThenTarget.from_pretrained(
             cfg.paths.ckpt_qwen_image21, **kwargs
         )
         if quantization_config is not None:

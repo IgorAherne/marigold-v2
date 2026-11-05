@@ -59,11 +59,9 @@ class MaskedRGBAlbedoL1Loss:
             valid &= mask.to(device=pred.device, dtype=torch.bool)
         error = (pred - gt).abs()
         pixel_error = error.mean(dim=1)
-        loss = (
-            pixel_error[valid].mean()
-            if valid.any()
-            else torch.nan_to_num(pred).sum() * 0.0
-        )
+        # The mean over the valid pixels as sum / count: boolean indexing and a
+        # Python test on valid.any() would each wait for the GPU. No valid pixel -> 0.
+        loss = torch.where(valid, pixel_error, 0.0).sum() / valid.sum().clamp_min(1)
         batch.setdefault("loss", {})
         batch.setdefault("weighted_loss", 0.0)
         batch["loss"][self.loss_name] = loss

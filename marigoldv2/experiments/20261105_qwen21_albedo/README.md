@@ -23,6 +23,10 @@ What differs:
 - LoRA targets are 2.1's layers (attention q/k/v/out, the SwiGLU proj/gate/out, the
   shared modulation, text/image input and output norm); the shared modulation,
   timestep embedder and input/output projections stay in bf16.
+- A training step waits for the GPU once: the trainer reads the loss terms and the
+  gradient norm back in one copy, `transformer.py` builds the DiT's sequence layout
+  once per picture size instead of from GPU masks on every forward (bit-identical),
+  and constants are uploaded once.
 - `QwenImage21Decode` takes `checkpoint: true` to recompute the decoder in the
   backward pass: bit-identical output, decoder training memory at 768x576 from
   about 12 to 6.5 GiB (measured), for cards under 32 GB.

@@ -463,6 +463,7 @@ class DinoV3SpatialLoss:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._feature_model = None
         self._image_processor = None
+        self._input_norm = {}  # (device, dtype) -> (mean, std), uploaded once
 
     def _resolve_key(self, batch, key):
         out = batch
@@ -515,12 +516,17 @@ class DinoV3SpatialLoss:
             antialias=True,
         )
 
-        mean = torch.tensor(
-            self._image_processor.image_mean, device=x.device, dtype=x.dtype
-        ).view(1, 3, 1, 1)
-        std = torch.tensor(
-            self._image_processor.image_std, device=x.device, dtype=x.dtype
-        ).view(1, 3, 1, 1)
+        key = (x.device, x.dtype)
+        if key not in self._input_norm:
+            # A host-to-device copy of a Python list waits for the GPU: once only.
+            self._input_norm[key] = tuple(
+                torch.tensor(v, device=x.device, dtype=x.dtype).view(1, 3, 1, 1)
+                for v in (
+                    self._image_processor.image_mean,
+                    self._image_processor.image_std,
+                )
+            )
+        mean, std = self._input_norm[key]
         return (x - mean) / std.clamp_min(self.eps)
 
     def _extract_patch_tokens(self, model_out) -> torch.Tensor:
@@ -657,7 +663,7 @@ class DinoV3SpatialLoss:
         gt_tokens = self._spatial_normalize(gt_tokens)
 
         total_w = sum(student_weights) if len(student_weights) > 0 else 1.0
-        loss = torch.tensor(0.0, device=self.device, dtype=torch.float32)
+        loss = torch.zeros((), device=self.device, dtype=torch.float32)
 
         for s_tok, w in zip(student_tokens_list, student_weights):
             s_tok = self._spatial_normalize(s_tok)
@@ -670,7 +676,7 @@ class DinoV3SpatialLoss:
             if s_tok.shape[-1] == gt_tokens.shape[-1]:
                 l_tok = self._token_l1(s_tok, gt_tokens, token_mask)
             else:
-                l_tok = torch.tensor(0.0, device=self.device, dtype=torch.float32)
+                l_tok = torch.zeros((), device=self.device, dtype=torch.float32)
 
             l_pair = self._pairwise_structure_loss(s_tok, gt_tokens, token_mask)
             l_layer = self.token_l1_weight * l_tok + self.pairwise_weight * l_pair

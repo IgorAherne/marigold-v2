@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+import math
 import os
 from time import time
 from torch.utils.data import DataLoader
@@ -124,20 +125,17 @@ class GenericTrainer:
             pass
         return None
 
-    def _compute_grad_norm(self, params, norm_type: float = 2.0):
-        total = 0.0
-        for p in params:
-            if p.grad is None:
+    @staticmethod
+    def _trainable_params():
+        seen, params = set(), []
+        for module in REGISTRY["network_components"].values():
+            if not isinstance(module, nn.Module):
                 continue
-            try:
-                param_norm = float(p.grad.detach().norm(norm_type).cpu().item())
-            except Exception:
-                # Fallback if grad is on CPU or other device
-                param_norm = float(p.grad.detach().norm(norm_type).item())
-            total += param_norm**norm_type
-        if total == 0.0:
-            return 0.0
-        return total ** (1.0 / norm_type)
+            for p in module.parameters():
+                if p.requires_grad and id(p) not in seen:
+                    seen.add(id(p))
+                    params.append(p)
+        return params
 
     def _log_saved_visualizations_to_tensorboard(
         self,
@@ -337,10 +335,11 @@ class GenericTrainer:
         set_to_eval()
         set_to_train()
 
+        params = self._trainable_params()
         for epoch in range(self.cfg.optimization.max_epoch):
             start_data_load = time()
             # accumulator for logging the effective (averaged over micro-batches) loss
-            running_weighted_loss = torch.tensor(0.0, device=accelerator.device)
+            running_weighted_loss = torch.zeros((), device=accelerator.device)
             for step, batch in enumerate(self.train_loader):
                 if time() - start_data_load > 0.1:
                     print(
@@ -371,18 +370,41 @@ class GenericTrainer:
                     loss = torch.as_tensor(
                         loss or 0.0, device=accelerator.device, dtype=torch.float32
                     )
-                if not torch.isfinite(loss.detach()).all():
-                    if accelerator.is_main_process:
-                        logging.warning(
-                            "Skipping optimizer step at global_step=%s because weighted_loss is non-finite.",
-                            self.global_step,
-                        )
-                    self.optimizer.zero_grad()
-                    running_weighted_loss = torch.tensor(0.0, device=accelerator.device)
-                    continue
                 accelerator.backward(loss)
                 # Optimization Step
                 if accelerator.sync_gradients:
+                    # The step's one wait for the GPU: a single copy of what the
+                    # finiteness check and the logs need. clip_grad_norm_ returns the
+                    # pre-clip norm, and scales the gradients by min(1, max / norm).
+                    pre_norm = accelerator.clip_grad_norm_(params, self.max_grad_norm)
+                    scale = (self.max_grad_norm / (pre_norm + 1e-6)).clamp(max=1.0)
+                    loss_terms = list(batch["loss"].items())
+                    stats = (
+                        torch.stack(
+                            [
+                                t.detach().float().reshape(())
+                                for t in (
+                                    running_weighted_loss,
+                                    pre_norm,
+                                    pre_norm * scale,
+                                    *(v for _, v in loss_terms),
+                                )
+                            ]
+                        )
+                        .cpu()
+                        .tolist()
+                    )
+                    if not (math.isfinite(stats[0]) and math.isfinite(stats[1])):
+                        if accelerator.is_main_process:
+                            logging.warning(
+                                "Skipping optimizer step at global_step=%s: non-finite loss or gradients.",
+                                self.global_step,
+                            )
+                        self.optimizer.zero_grad()
+                        running_weighted_loss = torch.zeros(
+                            (), device=accelerator.device
+                        )
+                        continue
                     self.global_step += 1
 
                     # Checkpointing, visualization, and validation
@@ -445,46 +467,22 @@ class GenericTrainer:
 
                         set_to_train()
 
-                    seen = set()
-                    params = []
-
-                    for name, module in REGISTRY["network_components"].items():
-                        if not isinstance(module, nn.Module):
-                            continue
-                        for p in module.parameters():
-                            if not p.requires_grad:
-                                continue
-                            pid = id(p)
-                            if pid in seen:
-                                continue
-                            seen.add(pid)
-                            params.append(p)
-
-                    # compute pre-clip gradient norm for logging
-                    pre_grad_norm = self._compute_grad_norm(params)
-
-                    accelerator.clip_grad_norm_(params, self.max_grad_norm)
-
-                    # compute post-clip gradient norm for logging
-                    post_grad_norm = self._compute_grad_norm(params)
-
                     self.optimizer.step()
                     self.lr_scheduler.step()
                     self.optimizer.zero_grad()
 
-                    effective_loss = running_weighted_loss.detach()
                     # reset accumulator for next optimizer step
-                    running_weighted_loss = torch.tensor(0.0, device=accelerator.device)
+                    running_weighted_loss = torch.zeros((), device=accelerator.device)
 
                     logs = {
-                        "train/loss": float(effective_loss.item()),
+                        "train/loss": stats[0],
                         **{
-                            f"unweighted train/{key}": val.detach().item()
-                            for key, val in batch["loss"].items()
+                            f"unweighted train/{key}": value
+                            for (key, _), value in zip(loss_terms, stats[3:])
                         },
                         "lr": self.lr_scheduler.get_last_lr()[0],
-                        "grad/pre_norm": float(pre_grad_norm),
-                        "grad/post_norm": float(post_grad_norm),
+                        "grad/pre_norm": stats[1],
+                        "grad/post_norm": stats[2],
                     }
 
                     accelerator.log(logs, step=self.global_step)
