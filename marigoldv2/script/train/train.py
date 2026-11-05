@@ -8,7 +8,6 @@ os.environ.setdefault("NCCL_P2P_DISABLE", "1")
 
 import random
 import numpy as np
-import bitsandbytes as bnb
 
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.utils import (
@@ -29,6 +28,7 @@ import transformers
 import diffusers
 
 from marigoldv2.trainer import get_trainer_cls
+from marigoldv2.trainer.adamw8bit import AdamW8bit
 from marigoldv2.trainer.util import read_global_step
 
 from marigoldv2.core.builder import (
@@ -383,7 +383,7 @@ def main():
     adam_weight_decay = float(cfg.optimization.get("adam_weight_decay", 1e-4))
 
     if optimizer_name == "adamw8bit":
-        optimizer = bnb.optim.AdamW8bit(
+        optimizer = AdamW8bit(
             param_groups,
             betas=(adam_beta1, adam_beta2),
             weight_decay=adam_weight_decay,
