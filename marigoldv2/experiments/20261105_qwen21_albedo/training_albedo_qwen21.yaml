@@ -1,6 +1,7 @@
 # ---- Base configs (dataset definitions) ----
 base_config:
   - marigoldv2/config/datasets/20260803_hypersim_qwen_albedo_768.yaml
+  - marigoldv2/config/datasets/20261105_arb_objaverse_albedo_512.yaml
 
 register_modules:
 - marigoldv2.dataset.generic_dataset
@@ -13,6 +14,7 @@ register_modules:
 - marigoldv2.experiments.20260803_qwen_albedo.network_graph
 - marigoldv2.experiments.20260803_qwen_albedo.loss
 - marigoldv2.experiments.20260803_qwen_albedo.validation
+- marigoldv2.experiments.20261105_qwen21_albedo.data
 - marigoldv2.experiments.20261105_qwen21_albedo.network_graph
 - marigoldv2.experiments.20261105_qwen21_albedo.component_loader
 
@@ -47,10 +49,13 @@ dataloader:
 dataset:
   train:
     hypersim_train_albedo_qwen_768: ${hypersim_train_albedo_qwen_768}
+    arb_objaverse_train_albedo_512: ${arb_objaverse_train_albedo_512}
   val:
     hypersim_val_albedo_qwen_768: ${hypersim_val_albedo_qwen_768}
+    arb_objaverse_val_albedo_512: ${arb_objaverse_val_albedo_512}
   vis:
     hypersim_vis_albedo_qwen_768: ${hypersim_vis_albedo_qwen_768}
+    arb_objaverse_vis_albedo_512: ${arb_objaverse_vis_albedo_512}
 trainer:
   name: GenericTrainer
   dtype: torch.bfloat16
