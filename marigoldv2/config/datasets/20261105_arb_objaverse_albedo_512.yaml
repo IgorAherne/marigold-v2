@@ -11,6 +11,9 @@ arb_objaverse_train_albedo_512:
   transform:
     - ReadArbObjaversePair:
         srgb_p: 0.5
+    # 512 as rendered, or enlarged to the scale of our 1024-px views
+    - RandomSizeRGBAlbedo:
+        sizes: [512, 768, 1024]
     - RandomHorizontalFlipAlbedo:
         p: 0.5
         include_keys: [rgb_norm, rgb_int, albedo_gt, valid_mask]

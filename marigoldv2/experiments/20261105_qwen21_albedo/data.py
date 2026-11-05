@@ -12,6 +12,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from PIL import Image
 
 from marigoldv2.core.registry import register
@@ -105,4 +106,54 @@ class ReadArbObjaversePair:
         albedo = torch.from_numpy(linear.transpose(2, 0, 1).copy())
         sample[self.output_key] = torch.where(covered, albedo, torch.zeros_like(albedo))
         sample[self.mask_key] = torch.from_numpy((rgba[..., 3] >= 250) & lit)[None]
+        return sample
+
+
+@register("dataset_transform")
+class RandomSizeRGBAlbedo:
+    """Square resize to a side drawn per sample from ``sizes``, so the 512-px objects
+    are also seen at the scale of Spellcast3D's 1024-px views. Unlike ResizeRGBAlbedo
+    the albedo is not zeroed outside the mask (unlit pixels keep their colour for
+    DINOv3); the mask keeps only pixels whose every bilinear source was valid.
+    """
+
+    def __init__(
+        self,
+        sizes=(512, 768, 1024),
+        rgb_keys=("rgb_norm", "rgb_int"),
+        albedo_key="albedo_gt",
+        mask_key="valid_mask",
+    ):
+        self.sizes = [int(s) for s in sizes]
+        if not self.sizes or any(s <= 0 or s % 16 for s in self.sizes):
+            raise ValueError(f"sizes must be positive multiples of 16, got {sizes}")
+        self.rgb_keys = list(rgb_keys)
+        self.albedo_key = str(albedo_key)
+        self.mask_key = str(mask_key)
+
+    def __call__(self, sample):
+        h, w = sample[self.albedo_key].shape[-2:]
+        if h != w:
+            raise ValueError(f"RandomSizeRGBAlbedo expects square pictures, got {h}x{w}")
+        side = random.choice(self.sizes)
+        if side == h:
+            return sample
+
+        def resize(value):
+            return F.interpolate(
+                value[None].float(), size=(side, side), mode="bilinear",
+                align_corners=False, antialias=side < h,
+            )[0]
+
+        for key in self.rgb_keys + [self.albedo_key]:
+            value = sample.get(key)
+            if value is None:
+                continue
+            out = resize(value)
+            sample[key] = (
+                out.to(value.dtype)
+                if torch.is_floating_point(value)
+                else out.round().clamp(0, 255).to(value.dtype)
+            )
+        sample[self.mask_key] = resize(sample[self.mask_key]) >= 0.999
         return sample
