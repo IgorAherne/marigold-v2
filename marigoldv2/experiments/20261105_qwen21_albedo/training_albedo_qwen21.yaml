@@ -1,6 +1,6 @@
 # ---- Base configs (dataset definitions) ----
 base_config:
-  - marigoldv2/config/datasets/20260803_hypersim_qwen_albedo_768.yaml
+  - marigoldv2/config/datasets/20261105_hypersim_qwen_albedo_1024.yaml
   - marigoldv2/config/datasets/20261105_arb_objaverse_albedo_512.yaml
 
 register_modules:
@@ -48,13 +48,13 @@ dataloader:
   seed: 2025
 dataset:
   train:
-    hypersim_train_albedo_qwen_768: ${hypersim_train_albedo_qwen_768}
+    hypersim_train_albedo_qwen_1024: ${hypersim_train_albedo_qwen_1024}
     arb_objaverse_train_albedo_512: ${arb_objaverse_train_albedo_512}
   val:
-    hypersim_val_albedo_qwen_768: ${hypersim_val_albedo_qwen_768}
+    hypersim_val_albedo_qwen_1024: ${hypersim_val_albedo_qwen_1024}
     arb_objaverse_val_albedo_512: ${arb_objaverse_val_albedo_512}
   vis:
-    hypersim_vis_albedo_qwen_768: ${hypersim_vis_albedo_qwen_768}
+    hypersim_vis_albedo_qwen_1024: ${hypersim_vis_albedo_qwen_1024}
     arb_objaverse_vis_albedo_512: ${arb_objaverse_vis_albedo_512}
 trainer:
   name: GenericTrainer
@@ -84,7 +84,7 @@ network_graph:
     kwargs:
       input_key: lat_encoding
       output_key: pixel_pred
-      checkpoint: false
+      checkpoint: true
   RGBAlbedoPrediction:
     kwargs:
       input_key: out/pixel_pred

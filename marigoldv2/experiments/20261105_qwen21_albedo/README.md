@@ -10,7 +10,8 @@ LoRA on the DiT held in 4-bit NF4, a fine-tuned VAE decoder, masked L1 + DINOv3
 spatial loss, batch 1, 30k steps.
 
 What differs:
-- Data: Hypersim at 768x576 (indoor rooms) mixed 50/50 with Arb-Objaverse at
+- Data: Hypersim at its native 1024x768 (indoor rooms; Marigold V2 halves it to
+  768x576) mixed 50/50 with Arb-Objaverse at
   512x512 (single objects, seven lightings each, over black like Spellcast3D's
   views). Arb-Objaverse stored both its pictures through Blender 3.3's Filmic view;
   `data.py` undoes it with `blender33_filmic_inverse.txt` (made by
@@ -27,9 +28,9 @@ What differs:
   gradient norm back in one copy, `transformer.py` builds the DiT's sequence layout
   once per picture size instead of from GPU masks on every forward (bit-identical),
   and constants are uploaded once.
-- `QwenImage21Decode` takes `checkpoint: true` to recompute the decoder in the
-  backward pass: bit-identical output, decoder training memory at 768x576 from
-  about 12 to 6.5 GiB (measured), for cards under 32 GB.
+- `QwenImage21Decode` recomputes the decoder in the backward pass (`checkpoint:
+  true`): bit-identical output. At 1024x768 a step otherwise peaks at 28.6 GiB on a
+  32 GB RTX 5090 (18.5 GiB with it, 2.06 vs 1.95 s a step; DINOv3 not included).
 
 ## On a Linux pod (one 32 GB card with bf16, about 1 TB of disk)
 
