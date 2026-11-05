@@ -51,7 +51,13 @@ class LoadArbObjaverseManifest:
             key = f"arb_{color.replace('/', '_')}"
             if key in manifest:
                 raise ValueError(f"Duplicate manifest key: {key}")
-            manifest[key] = {"rgb_path": str(rgb_path), "albedo_path": str(albedo_path)}
+            manifest[key] = {
+                "rgb_path": str(rgb_path),
+                "albedo_path": str(albedo_path),
+                # The object id names the visualisation files: every object's first
+                # picture is called color_0_00.png.
+                "scene": rgb_path.parent.name,
+            }
         if not manifest:
             raise ValueError(f"No samples in {self.manifest}")
         return manifest
@@ -64,8 +70,11 @@ class ReadArbObjaversePair:
 
     ``srgb_p`` is the chance the picture is re-encoded as plain sRGB (0 keeps it as
     rendered, for validation). Pixels whose brightest channel is under ``min_code``
-    (as rendered) say nothing about their colour, so the loss skips them: the
-    point-light renders leave much of an object in the dark.
+    (as rendered) say nothing about their colour, so the losses skip them: the
+    point-light renders leave much of an object in the dark. The albedo itself stays
+    on every covered pixel, lit or not, because the DINOv3 loss reads the whole
+    picture and would otherwise learn the shadows as black holes; only the
+    uncovered background is zeroed, where the PNG holds a few stray codes.
     """
 
     def __init__(
@@ -92,8 +101,8 @@ class ReadArbObjaversePair:
 
         albedo = np.asarray(Image.open(annotation["albedo_path"]).convert("RGB"))
         linear = np.clip(_FILMIC_TO_LINEAR[albedo], 0.0, 1.0).astype(np.float32)
-        valid = torch.from_numpy((rgba[..., 3] >= 250) & lit)[None]
+        covered = torch.from_numpy(rgba[..., 3] > 0)[None]
         albedo = torch.from_numpy(linear.transpose(2, 0, 1).copy())
-        sample[self.output_key] = torch.where(valid, albedo, torch.zeros_like(albedo))
-        sample[self.mask_key] = valid
+        sample[self.output_key] = torch.where(covered, albedo, torch.zeros_like(albedo))
+        sample[self.mask_key] = torch.from_numpy((rgba[..., 3] >= 250) & lit)[None]
         return sample

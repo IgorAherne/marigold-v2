@@ -523,9 +523,8 @@ class DinoV3SpatialLoss:
         ).view(1, 3, 1, 1)
         return (x - mean) / std.clamp_min(self.eps)
 
-    @staticmethod
-    def _extract_patch_tokens(model_out) -> torch.Tensor:
-        # Prefer patch tokens from last_hidden_state. If CLS exists, drop it.
+    def _extract_patch_tokens(self, model_out) -> torch.Tensor:
+        # Prefer patch tokens from last_hidden_state; drop CLS and register tokens.
         if (
             hasattr(model_out, "last_hidden_state")
             and model_out.last_hidden_state is not None
@@ -536,13 +535,15 @@ class DinoV3SpatialLoss:
         else:
             raise RuntimeError("DINOv3 output does not contain hidden states.")
 
-        # Typical ViT shape is [B, T+1, D] with CLS at index 0.
         if tokens.ndim != 3:
             raise RuntimeError(
                 f"Expected token tensor [B,T,D], got {tuple(tokens.shape)}"
             )
-        if tokens.shape[1] > 1:
-            tokens = tokens[:, 1:, :]
+        # ViT layout [CLS, registers..., patches...]: DINOv3 carries 4 registers, and
+        # only the patches lie on the grid the valid mask is mapped onto.
+        lead = 1 + int(getattr(self._feature_model.config, "num_register_tokens", 0))
+        if tokens.shape[1] > lead:
+            tokens = tokens[:, lead:, :]
         return tokens
 
     def _spatial_normalize(self, x: torch.Tensor) -> torch.Tensor:
@@ -560,9 +561,13 @@ class DinoV3SpatialLoss:
         if mask.shape[1] != 1:
             mask = mask[:, :1]
 
-        token_hw = int(num_tokens**0.5)
+        token_hw = int(round(num_tokens**0.5))
         if token_hw * token_hw != num_tokens:
-            return None
+            # Falling back to no mask here would silently train on masked-out pixels.
+            raise ValueError(
+                f"{num_tokens} DINOv3 patch tokens do not form a square grid, so the "
+                "valid mask cannot be mapped onto them"
+            )
 
         m = F.interpolate(mask, size=(token_hw, token_hw), mode="nearest")
         m = (m > 0.5).flatten(1)  # [B, T]

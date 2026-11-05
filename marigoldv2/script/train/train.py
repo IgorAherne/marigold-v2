@@ -29,6 +29,7 @@ import transformers
 import diffusers
 
 from marigoldv2.trainer import get_trainer_cls
+from marigoldv2.trainer.util import read_global_step
 
 from marigoldv2.core.builder import (
     build_transforms,
@@ -571,7 +572,17 @@ def main():
 
     # Load checkpoint if specified
     checkpoint_path = cfg.paths.get("checkpoint", None)
-    if checkpoint_path is not None:
+    resume_dir = in_args.get("resume_run", None)
+    start_step = 0
+    if resume_dir is not None:
+        # Trainables through the load hook, then the optimizer, scheduler and RNG.
+        accelerator.load_state(resume_dir)
+        # checkpoint-N is written at step N before that step's update, so it holds
+        # N - 1 updates: the resumed run performs update N again.
+        start_step = read_global_step(resume_dir) - 1
+        if accelerator.is_main_process:
+            logging.info(f"Resumed {resume_dir} at step {start_step}")
+    elif checkpoint_path is not None:
         if accelerator.is_main_process:
             logging.info(f"Loading checkpoint from: {checkpoint_path}")
         load_hook([], checkpoint_path)
@@ -600,6 +611,7 @@ def main():
         vis_loaders=vis_loaders,
         loss_graph=loss_graph,
         lr_scheduler=lr_scheduler,
+        start_step=start_step,
     )
 
     # -------------------- Training & Evaluation Loop --------------------

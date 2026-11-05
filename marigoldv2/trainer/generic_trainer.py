@@ -14,7 +14,11 @@ from marigoldv2.util.logging_util import eval_dict_to_text
 from marigoldv2.validation.metric import MetricTracker
 from marigoldv2.validation import metric
 from marigoldv2.network.change_network_mode import set_to_eval, set_to_train
-from marigoldv2.trainer.util import save_step_info_txt, AccelerateRandomContext
+from marigoldv2.trainer.util import (
+    save_step_info_txt,
+    read_main_metric,
+    AccelerateRandomContext,
+)
 
 
 class GenericTrainer:
@@ -28,6 +32,7 @@ class GenericTrainer:
         val_loaders,
         vis_loaders,
         lr_scheduler=None,
+        start_step=0,
     ):
         self.network_graph = network_graph
         self.accelerator = accelerator
@@ -37,6 +42,7 @@ class GenericTrainer:
         self.loss_graph = loss_graph
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
+        self.start_step = int(start_step)
         self.val_info = {}
         self.train_vis_loader = None
         self.train_vis_iter = None
@@ -315,7 +321,17 @@ class GenericTrainer:
         else:
             self.best_val_score = float("-inf")
 
-        self.global_step = 0
+        # A resumed run gets its weights, optimizer, scheduler and RNG from accelerate
+        # and its best score from checkpoint-best, which a worse model must not replace.
+        if self.start_step > 0:
+            best = read_main_metric(
+                os.path.join(self.cfg.out_dir_run, "checkpoint", "checkpoint-best"),
+                self.main_val_metric,
+            )
+            if best is not None:
+                self.best_val_score = best
+                logging.info(f"Resumed best {self.main_val_metric}: {best:.6f}")
+        self.global_step = self.start_step
         self.max_global_step = self.cfg.optimization.max_iter
         # An eval/train round-trip before the loop lowers peak VAE memory.
         set_to_eval()

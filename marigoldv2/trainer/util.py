@@ -25,6 +25,31 @@ def save_step_info_txt(save_dir: str, step: int, val_info: dict) -> None:
         f.write("\n".join(lines))
 
 
+def read_global_step(save_dir: str) -> int:
+    """The step a checkpoint folder was written at, from its ``step_info.txt``."""
+    with open(os.path.join(save_dir, "step_info.txt"), encoding="utf-8") as f:
+        first = f.readline()
+    key, _, value = first.partition(":")
+    if key.strip() != "global_step":
+        raise ValueError(f"{save_dir}/step_info.txt does not start with global_step")
+    return int(value)
+
+
+def read_main_metric(save_dir: str, metric: str) -> float | None:
+    """The validation score a checkpoint was chosen by: ``metric`` averaged over
+    the datasets in its ``step_info.txt``, as ``validate`` combines them."""
+    path = os.path.join(save_dir, "step_info.txt")
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        values = [
+            float(value)
+            for key, _, value in (line.partition(":") for line in f)
+            if key.strip() == metric
+        ]
+    return sum(values) / len(values) if values else None
+
+
 class AccelerateRandomContext:
     """
     Snapshot current RNG (Python/NumPy/Torch CPU/CUDA) per process,

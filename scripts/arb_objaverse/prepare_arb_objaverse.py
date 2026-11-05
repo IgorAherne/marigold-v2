@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Download a slice of Arb-Objaverse and build the albedo training set from it.
 
-Per group (``data/000-XXX.zip`` of ``lizb6626/Arb-Objaverse``, ~12 GB, ~530 objects):
-keep only the objects whose Objaverse licence is CC-BY or CC0 (from
+Per group (``data/000-XXX.zip`` of ``lizb6626/Arb-Objaverse``, 9-12 GB, 390-540
+objects): keep only the objects whose Objaverse licence is CC-BY or CC0 (from
 ``allenai/objaverse`` metadata), extract their lit pictures and albedo (not the
-normals or materials) and delete the zip. ``credits.csv`` lists every kept object
-with its author and page, which CC-BY asks to credit. Then split by object into train/val/vis manifests of
-``<color png> <albedo png>`` lines. Finished groups are skipped on rerun.
+normals or materials; about 65 % of the zip) and delete the zip. ``credits.csv``
+lists every kept object with its author and page, which CC-BY asks to credit. Then
+split by object into train/val/vis manifests of ``<color png> <albedo png>`` lines.
+Finished groups are skipped on rerun.
 """
 
 from __future__ import annotations
@@ -18,14 +19,17 @@ import hashlib
 import json
 import os
 import re
+import time
 import zipfile
 from pathlib import Path
 
 from huggingface_hub import hf_hub_download
+from PIL import Image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ASSETS_DIR = Path(os.environ.get("DEPTH_ASSETS_DIR", REPO_ROOT / "assets")).expanduser()
 LICENCES = {"by", "cc0"}
+DOWNLOAD_ATTEMPTS = 3
 COLOR = re.compile(r"^color_(\d+)_(\d+)\.png$")
 ALBEDO = re.compile(r"^albedo_(\d+)\.png$")
 
@@ -39,6 +43,30 @@ def _metadata(group: str, work: Path) -> dict:
     )
     with gzip.open(path, "rt", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def _download_zip(group: str, work: Path) -> Path:
+    """One group's zip into ``work``. huggingface_hub 2.x never resumes a partial
+    file, so a killed attempt's leftover is deleted and the next one starts over."""
+    partials = work / ".cache" / "huggingface" / "download"
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        if partials.is_dir():
+            for stale in partials.rglob("*.incomplete"):
+                stale.unlink()
+        try:
+            return Path(
+                hf_hub_download(
+                    "lizb6626/Arb-Objaverse",
+                    f"data/{group}.zip",
+                    repo_type="dataset",
+                    local_dir=str(work),
+                )
+            )
+        except Exception as exc:
+            if attempt == DOWNLOAD_ATTEMPTS:
+                raise
+            print(f"[retry] {group}.zip after: {exc}", flush=True)
+            time.sleep(2**attempt)
 
 
 def extract_group(zip_path: Path, meta: dict, out_dir: Path) -> list[dict]:
@@ -76,17 +104,22 @@ def extract_group(zip_path: Path, meta: dict, out_dir: Path) -> list[dict]:
     return list(kept.values())
 
 
-def _pairs(object_dir: Path, base: Path) -> list[str]:
+def _pairs(object_dir: Path, base: Path, dropped: list[str]) -> list[str]:
     names = {p.name for p in object_dir.iterdir()}
     out = []
     for name in sorted(names):
         m = COLOR.match(name)
-        if m and f"albedo_{m.group(2)}.png" in names:
-            color = (object_dir / name).relative_to(base).as_posix()
-            albedo = (
-                (object_dir / f"albedo_{m.group(2)}.png").relative_to(base).as_posix()
-            )
-            out.append(f"{color} {albedo}")
+        albedo = f"albedo_{m.group(2)}.png" if m else None
+        if albedo not in names:
+            continue
+        # The model takes sides in multiples of 32 and the pair must line up; an
+        # odd render would stop the training hours in, so it stays out.
+        sizes = {Image.open(object_dir / f).size for f in (name, albedo)}
+        if len(sizes) != 1 or any(side % 32 for side in sizes.pop()):
+            dropped.append((object_dir / name).relative_to(base).as_posix())
+            continue
+        color = (object_dir / name).relative_to(base).as_posix()
+        out.append(f"{color} {(object_dir / albedo).relative_to(base).as_posix()}")
     return out
 
 
@@ -109,17 +142,25 @@ def write_manifests(out_dir: Path, val_objects: int, vis_objects: int) -> None:
         set(rank[vis_objects : vis_objects + val_objects]),
     )
     split = {"train": [], "val": [], "vis": []}
+    dropped = []
     for obj in objects:
-        pairs = _pairs(obj, out_dir)
+        pairs = _pairs(obj, out_dir, dropped)
         if obj in vis:
             split["vis"] += pairs[:1]
         elif obj in val:
-            split["val"] += pairs[:: max(1, len(pairs) // 2)][:2]
+            # The first and last pairs: one under the first HDRI, one under the
+            # point lights, which leave the most of an object in the dark.
+            split["val"] += pairs[:1] + pairs[-1:]
         else:
             split["train"] += pairs
     for name, lines in split.items():
         (out_dir / f"arb_objaverse_{name}.txt").write_text("\n".join(lines) + "\n")
         print(f"[manifest] {name}: {len(lines)} pairs")
+    if dropped:
+        (out_dir / "dropped_pairs.txt").write_text("\n".join(dropped) + "\n")
+        print(
+            f"[manifest] {len(dropped)} pairs of odd size left out: dropped_pairs.txt"
+        )
 
 
 def main() -> None:
@@ -148,14 +189,7 @@ def main() -> None:
             zip_path = Path(args.zip_dir) / f"{group}.zip"
         else:
             print(f"[download] {group}.zip", flush=True)
-            zip_path = Path(
-                hf_hub_download(
-                    "lizb6626/Arb-Objaverse",
-                    f"data/{group}.zip",
-                    repo_type="dataset",
-                    local_dir=str(work),
-                )
-            )
+            zip_path = _download_zip(group, work)
         rows = extract_group(zip_path, meta, out_dir)
         with (work / f"credits-{group}.csv").open(
             "w", newline="", encoding="utf-8"
@@ -163,9 +197,10 @@ def main() -> None:
             writer = csv.DictWriter(handle, CREDITS)
             writer.writeheader()
             writer.writerows(rows)
+        # The marker goes first: a crash between the two must not cost a re-download.
+        done.touch()
         if not args.zip_dir:
             zip_path.unlink()
-        done.touch()
         print(f"[group] {group}: {len(rows)} objects kept", flush=True)
     write_manifests(out_dir, args.val_objects, args.vis_objects)
 

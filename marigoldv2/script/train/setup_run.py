@@ -15,7 +15,10 @@ from accelerate.utils import broadcast_object_list
 from omegaconf import OmegaConf
 
 from marigoldv2.core.registry import REGISTRY
-from marigoldv2.util.config_resolvers import recursive_load_config
+from marigoldv2.util.config_resolvers import (
+    recursive_load_config,
+    register_omegaconf_resolvers,
+)
 from marigoldv2.util.logging_util import config_logging
 
 
@@ -63,6 +66,8 @@ def setup_run():
     if args.resume_run is not None:
         logging.info(f"Resuming run: {args.resume_run}")
         out_dir_run = str(Path(args.resume_run).resolve().parent.parent)
+        # The saved config keeps its ${mul:...} interpolations unresolved.
+        register_omegaconf_resolvers()
         cfg = OmegaConf.load(os.path.join(out_dir_run, "config.yaml"))
         if "use_paths_from" in cfg.paths:
             cfg.paths = cfg.paths[cfg.paths.use_paths_from]

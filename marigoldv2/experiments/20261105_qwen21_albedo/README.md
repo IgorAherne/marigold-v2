@@ -33,9 +33,10 @@ What differs:
 git clone -b spellcast3d <this repository> marigold-v2 && cd marigold-v2
 bash setup/setup_env.sh && conda activate marigold-v2   # or a venv: torch 2.10 cu128, then pip install -e .
 hf auth login                                           # after accepting the DINOv3 terms on Hugging Face
-python scripts/download_assets.py --qwen21-albedo       # Qwen-Image-2.1-Turbo, DINOv3, Hypersim RGB (127 GB)
-bash scripts/hypersim_albedo/download_and_preprocess_hypersim_albedo.sh   # ~500 GB
-python scripts/arb_objaverse/prepare_arb_objaverse.py   # 15 zips: ~185 GB down, ~120 GB kept
+export DEPTH_DOWNLOAD_FILE_TIMEOUT=7200                 # a killed transfer starts over: give each 4.5 GB shard time
+python scripts/download_assets.py --qwen21-albedo       # Qwen-Image-2.1-Turbo (32.5 GB), DINOv3, Hypersim RGB (127 GB)
+bash scripts/hypersim_albedo/download_and_preprocess_hypersim_albedo.sh   # checks for 500 GB free, writes ~275 GB
+python scripts/arb_objaverse/prepare_arb_objaverse.py   # 15 zips: ~150 GB down, ~96 GB kept (~6.3k objects)
 python scripts/qwen21/make_prompt_embeds.py
 python marigoldv2/script/train/train.py \
   --config marigoldv2/experiments/20261105_qwen21_albedo/training_albedo_qwen21.yaml \
@@ -47,5 +48,9 @@ python scripts/qwen21/infer_albedo.py --image_dir <pictures> --output_dir output
 Only Objaverse objects under CC-BY or CC0 are kept; `credits.csv` next to the
 data lists each one's author and page for attribution.
 
-Checkpoints land every 5k steps; `trainables.safetensors` holds the LoRA
-(`Diffuser.*`) and the decoder (`VAE.decoder.*`, `VAE.post_quant_conv.*`).
+Checkpoints land every 5k steps (plus `checkpoint-best` and `checkpoint-latest` at
+every 2k-step validation, each about 2.5 GB: `trainables.safetensors` with the LoRA
+(`Diffuser.*`) and the decoder (`VAE.decoder.*`, `VAE.post_quant_conv.*`), the
+AdamW8bit state, the scheduler, the samplers and the random states). The validation
+is 400 pictures (200 Hypersim, 200 Arb-Objaverse: one HDRI and one point-light
+picture per object), so budget a few minutes for each.

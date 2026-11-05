@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Download models, checkpoints, prompt embeddings, and training datasets into assets/.
 
-Resumable: existing files are skipped, partial downloads continue, and tar
+Resumable: finished files are skipped (an interrupted file starts over), and tar
 shards are extracted in place (and deleted unless --keep-archives).
 For depth and normals evaluation datasets, follow the README evaluation instructions.
 """
@@ -208,8 +208,10 @@ def _download_snapshot_with_watchdog(
 ) -> None:
     """Download files one by one in child processes with a hard per-file timeout.
 
-    ``snapshot_download`` can hang on a stalled connection; a killed child
-    process is retried and resumes from the partial file.
+    ``snapshot_download`` can hang on a stalled connection; a killed child process
+    is retried. huggingface_hub 2.x downloads into a uniquely named temporary file
+    that a later attempt cannot resume, so a killed attempt's leftover is deleted
+    and the file starts over: the timeout must cover a whole file.
     """
     files = list_repo_files(repo_id=repo_id, repo_type=repo_type)
     selected = [
@@ -230,6 +232,7 @@ def _download_snapshot_with_watchdog(
         raise RuntimeError(f"No files matched the requested patterns in {repo_id}")
 
     context = multiprocessing.get_context("spawn")
+    partials = destination / ".cache" / "huggingface" / "download"
     for index, filename in enumerate(selected, start=1):
         target = destination / filename
         marker = target.with_name(f".{target.name}.extracted")
@@ -243,6 +246,9 @@ def _download_snapshot_with_watchdog(
                 f"(attempt {attempt}/{DOWNLOAD_ATTEMPTS}, timeout {DOWNLOAD_FILE_TIMEOUT}s)",
                 flush=True,
             )
+            if partials.is_dir():
+                for stale in partials.rglob("*.incomplete"):
+                    stale.unlink()
             process = context.Process(
                 target=_download_file_worker,
                 args=(repo_id, filename, str(destination), repo_type),
@@ -264,7 +270,9 @@ def _download_snapshot_with_watchdog(
 
             if attempt < DOWNLOAD_ATTEMPTS:
                 delay = 2**attempt
-                print(f"[retry] {repo_id} {filename}; resuming in {delay}s", flush=True)
+                print(
+                    f"[retry] {repo_id} {filename}; restarting in {delay}s", flush=True
+                )
                 time.sleep(delay)
         else:
             raise RuntimeError(
