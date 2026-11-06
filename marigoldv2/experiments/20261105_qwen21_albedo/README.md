@@ -71,6 +71,10 @@ picture per object), so budget a few minutes for each.
   reaches its floor: 20k steps would do. Best mean MAE at 24k. The Hypersim
   validation frames are held out from scenes that are also trained on, so they are
   easier than Marigold V2's test-split numbers; Arb-Objaverse is split by object.
+- Hypersim IID test split with `evaluation/albedo/eval_qwen_albedo_hypersim.py`
+  (every 5th frame: 1,048 frames, 43 of 44 scenes, native 1024x768, checkpoint 30k):
+  PSNR 21.47, SSIM 0.834, LPIPS 0.167 (Marigold V2 on Qwen-Image-Edit-2509: 20.78 /
+  0.811 / 0.195).
 - Trained on Turbo, the add-on also runs on the full Qwen-Image 2.1
   (`--model_dir .../Qwen-Image-2.1`): the transformers differ by 0.24 % (the VAE is
   the same), and on 1024-px object views the albedo stays within 36-45 dB PSNR of
