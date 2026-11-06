@@ -71,12 +71,21 @@ def main() -> None:
         help="Folder with trainables.safetensors (none: the base model).",
     )
     parser.add_argument("--config", default=str(CONFIG))
+    parser.add_argument(
+        "--model_dir",
+        help="Qwen-Image 2.1 folder to run on (default: the config's, Turbo).",
+    )
     parser.add_argument("--long_side", type=int, default=1024)
     args = parser.parse_args()
 
     cfg = recursive_load_config(args.config)
+    # The config keeps its paths in paths.<use_paths_from>: an override of a top-level
+    # paths key is dropped here, so the model folder is printed and settable directly.
     if "use_paths_from" in cfg.paths:
         cfg.paths = cfg.paths[cfg.paths.use_paths_from]
+    if args.model_dir:
+        cfg.paths.ckpt_qwen_image21 = args.model_dir
+    print(f"[model] {cfg.paths.ckpt_qwen_image21}")
     REGISTRY["cfg"] = cfg
     register_experiment_modules(cfg)
     build_transforms(cfg.network_components, registry_category="network_components")({})

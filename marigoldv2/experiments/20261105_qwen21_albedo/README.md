@@ -63,3 +63,18 @@ every 2k-step validation, each about 2.5 GB: `trainables.safetensors` with the L
 AdamW8bit state, the scheduler, the samplers and the random states). The validation
 is 400 pictures (200 Hypersim, 200 Arb-Objaverse: one HDRI and one point-light
 picture per object), so budget a few minutes for each.
+
+## First run (2026-11-06, one RTX 5090, 14 h)
+
+- Validation PSNR at 2k / 10k / 20k / 30k steps: Hypersim 19.1 / 22.8 / 24.1 / 24.1,
+  Arb-Objaverse 20.1 / 21.7 / 22.3 / 22.2. Flat after 20k, where the learning rate
+  reaches its floor: 20k steps would do. Best mean MAE at 24k. The Hypersim
+  validation frames are held out from scenes that are also trained on, so they are
+  easier than Marigold V2's test-split numbers; Arb-Objaverse is split by object.
+- Trained on Turbo, the add-on also runs on the full Qwen-Image 2.1
+  (`--model_dir .../Qwen-Image-2.1`): the transformers differ by 0.24 % (the VAE is
+  the same), and on 1024-px object views the albedo stays within 36-45 dB PSNR of
+  Turbo's.
+- Arb-Objaverse label noise, left in: about 1 % of objects look the same under all
+  seven lights (unlit assets) and about 1.6 % have an albedo far darker than their
+  renders. Its albedo is the base colour (metals keep theirs, per the `orm` maps).
